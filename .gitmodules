@@ -1,0 +1,3 @@
+[submodule "subs/vte"]
+	path = subs/vte
+	url = https://github.com/asifamin13/vte.git
