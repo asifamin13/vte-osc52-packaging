@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "Usage: vte-osc52-run COMMAND [ARG ...]" >&2
+    exit 2
+fi
+
+LD_LIBRARY_PATH="/opt/vte-osc52/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+GI_TYPELIB_PATH="/opt/vte-osc52/lib/girepository-1.0${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+export LD_LIBRARY_PATH GI_TYPELIB_PATH
+exec "$@"

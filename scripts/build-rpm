@@ -1,0 +1,54 @@
+#!/bin/bash
+set -euo pipefail
+
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd -- "$repo"
+
+if ! command -v mock >/dev/null 2>&1; then
+    echo "mock is required. Install it with: sudo dnf install mock" >&2
+    echo "Configure Mock access for your account before running this script." >&2
+    exit 1
+fi
+
+pinned=$(git ls-tree HEAD -- subs/vte)
+if [[ $pinned != '160000 commit '* ]]; then
+    echo "HEAD must record subs/vte as a git submodule." >&2
+    exit 1
+fi
+pinned=${pinned#160000 commit }
+pinned=${pinned%%$'\t'*}
+if [[ ! -e subs/vte/.git ]]; then
+    echo "Initialize VTE first: git submodule update --init --recursive" >&2
+    exit 1
+fi
+head=$(git -C subs/vte rev-parse HEAD)
+if [[ $head != "$pinned" ]]; then
+    echo "subs/vte HEAD ($head) differs from the recorded gitlink ($pinned)." >&2
+    echo "Restore it with: git submodule update --init --recursive" >&2
+    exit 1
+fi
+
+sources=$(mktemp -d)
+trap 'rm -rf -- "$sources"' EXIT
+resultdir="$repo/rpm-results"
+mkdir -p -- "$resultdir"
+git -C subs/vte archive --format=tar.gz --prefix=vte-0.84.1/ \
+    --output="$sources/vte-0.84.1.tar.gz" "$pinned"
+cp -- scripts/vte-osc52-run "$sources/vte-osc52-run"
+printf 'Building VTE source commit %s\n' "$pinned"
+
+touch "$sources/build-start"
+mock "$@" --buildsrpm --spec "$repo/packaging/rpm/vte-osc52.spec" \
+    --sources "$sources" --resultdir "$resultdir"
+shopt -s nullglob
+srpms=()
+for srpm in "$resultdir"/vte-osc52-0.84.1-*.src.rpm; do
+    if [[ $srpm -nt "$sources/build-start" ]]; then
+        srpms+=("$srpm")
+    fi
+done
+if [[ ${#srpms[@]} -ne 1 ]]; then
+    echo "Expected exactly one newly built VTE SRPM in $resultdir; found ${#srpms[@]}." >&2
+    exit 1
+fi
+mock "$@" --rebuild "${srpms[0]}" --resultdir "$resultdir"
