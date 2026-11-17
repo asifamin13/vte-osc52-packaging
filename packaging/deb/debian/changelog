@@ -1,0 +1,5 @@
+vte-osc52 (0.85.0-1) noble; urgency=medium
+
+  * Package pinned VTE privately with opt-in GTK and binding features.
+
+ -- VTE OSC 52 maintainers <maintainers@example.invalid>  Mon, 17 Nov 2026 00:00:00 +0000

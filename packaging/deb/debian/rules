@@ -1,0 +1,51 @@
+#!/usr/bin/make -f
+# Keep every Meson directory private; no system VTE is replaced.
+
+CONFIGURE_FLAGS = \
+	--prefix=/opt/vte-osc52 \
+	--libdir=lib \
+	--sysconfdir=/opt/vte-osc52/etc \
+	--wrap-mode=nofallback \
+	-Dgtk3=true \
+	-Dgir=true
+
+ifeq ($(filter pkg.vte.gtk4,$(DEB_BUILD_PROFILES)),)
+CONFIGURE_FLAGS += -Dgtk4=true
+else
+CONFIGURE_FLAGS += -Dgtk4=false
+endif
+
+ifeq ($(filter pkg.vte.vapi,$(DEB_BUILD_PROFILES)),)
+CONFIGURE_FLAGS += -Dvapi=false
+else
+CONFIGURE_FLAGS += -Dvapi=true
+endif
+
+ifeq ($(filter pkg.vte.docs,$(DEB_BUILD_PROFILES)),)
+CONFIGURE_FLAGS += -Ddocs=false
+else
+CONFIGURE_FLAGS += -Ddocs=true
+endif
+
+ifeq ($(filter pkg.vte.glade,$(DEB_BUILD_PROFILES)),)
+CONFIGURE_FLAGS += -Dglade=false
+else
+CONFIGURE_FLAGS += -Dglade=true
+endif
+
+%:
+	dh $@ --buildsystem=meson
+
+override_dh_auto_configure:
+	dh_auto_configure -- $(CONFIGURE_FLAGS)
+
+override_dh_auto_test:
+	dh_auto_test -- vte:test-parser
+
+override_dh_auto_install:
+	dh_auto_install
+	install -Dpm 0755 ../vte-osc52-run debian/vte-osc52/usr/bin/vte-osc52-run
+
+# Private libraries must not satisfy dependencies on system VTE.
+override_dh_shlibdeps:
+	dh_shlibdeps -l/opt/vte-osc52/lib

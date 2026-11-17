@@ -72,6 +72,50 @@ opt into `/opt/vte-osc52/lib/pkgconfig` via `PKG_CONFIG_PATH`, Vala bindings in
 `GLADE_PIXMAP_PATH=/opt/vte-osc52/share/glade/pixmaps` as appropriate. API
 documentation is installed under `/opt/vte-osc52/share/doc`.
 
+## Ubuntu deb build
+
+Requires Git and Podman; the host need not be Ubuntu. The build runs
+`dpkg-buildpackage` inside an Ubuntu 24.04 (noble) container, so it installs
+the Meson toolchain and all build dependencies there; nothing is built on the
+host. Override the image with `VTE_OSC52_DEB_IMAGE` (default:
+`dump:5000/library/ubuntu:24.04`; edit `scripts/build-deb` if your registry
+differs). Build with:
+
+```sh
+scripts/build-deb
+```
+
+The deb uses the same private-prefix layout as the RPM (`/opt/vte-osc52`, only
+the launcher in `/usr/bin`). Build-time feature switches are Debian build
+profiles, mirroring the RPM `%bcond` defaults:
+
+| Profile | Default | Effect |
+| --- | --- | --- |
+| `pkg.vte.gtk4` | off (built) | GTK 4 library and `Vte-3.91` typelib |
+| `pkg.vte.vapi` | off | Vala bindings |
+| `pkg.vte.docs` | off | gi-docgen API documentation |
+| `pkg.vte.glade` | off | GTK 3 Glade catalog data |
+
+Example, GTK 3 only with Vala and docs:
+
+```sh
+DEB_BUILD_PROFILES="pkg.vte.vapi pkg.vte.docs" scripts/build-deb
+```
+
+Artifacts go into `deb-results/`; preserve it before building another
+variant. The meson test runs exactly `vte:test-parser`.
+
+Install the binary deb, then opt in:
+
+```sh
+sudo apt install ./deb-results/vte-osc52_0.85.0-1_amd64.deb
+vte-osc52-run terminator --no-dbus
+```
+
+GI consumers additionally need the system typelibs the private `Vte` typelibs
+reference (for example `gir1.2-freedesktop` and `gir1.2-gtk-4.0` for the GTK 4
+typelib); the deb does not pull them in automatically.
+
 ## Source
 
 The VTE fork is included as a submodule at `subs/vte`, initially pinned to tag `0.84.1-osc52.1`. Git records the exact source commit in the parent repository.
@@ -82,11 +126,12 @@ After cloning this repository, initialize the source checkout:
 git submodule update --init --recursive
 ```
 
-`scripts/build-rpm` requires the submodule HEAD to match the gitlink recorded
-in the parent repository's `HEAD`. It uses `git archive` of that exact commit,
-not the working tree: uncommitted submodule changes are never packaged.
-Temporary source files are removed on exit. No network source fetch is used;
-Mock still needs repository access to install build dependencies.
+`scripts/build-rpm` and `scripts/build-deb` require the submodule HEAD to
+match the gitlink recorded in the parent repository's `HEAD`. They use
+`git archive` of that exact commit, not the working tree: uncommitted
+submodule changes are never packaged. Temporary source files are removed on
+exit. No network source fetch is used; Mock/Podman still need repository
+access to install build dependencies.
 
 ## Clipboard security
 
