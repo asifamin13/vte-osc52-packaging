@@ -1,0 +1,92 @@
+#!/bin/bash
+set -euo pipefail
+
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd -- "$repo"
+
+if ! command -v podman >/dev/null 2>&1; then
+    echo "podman is required." >&2
+    exit 1
+fi
+
+suite=noble
+image=${VTE_OSC52_DEB_IMAGE:-dump:5000/library/ubuntu:24.04}
+container_name=vte-osc52-build-$suite-$$
+
+pinned=$(git ls-tree HEAD -- subs/vte)
+if [[ $pinned != '160000 commit '* ]]; then
+    echo "HEAD must record subs/vte as a git submodule." >&2
+    exit 1
+fi
+pinned=${pinned#160000 commit }
+pinned=${pinned%%$'\t'*}
+if [[ ! -e subs/vte/.git ]]; then
+    echo "Initialize VTE first: git submodule update --init --recursive" >&2
+    exit 1
+fi
+head=$(git -C subs/vte rev-parse HEAD)
+if [[ $head != "$pinned" ]]; then
+    echo "subs/vte HEAD ($head) differs from the recorded gitlink ($pinned)." >&2
+    echo "Restore it with: git submodule update --init --recursive" >&2
+    exit 1
+fi
+
+sources=$(mktemp -d)
+trap 'rm -rf -- "$sources"' EXIT
+resultdir="$repo/deb-results"
+mkdir -p -- "$resultdir"
+touch "$sources/build-start"
+tarfile="$sources/vte-0.85.0.tar.gz"
+
+# The Debian source tree: debian/ metadata plus git archives of the pinned
+# parent and each nested third_party submodule (git archive does not
+# recurse into nested submodules).
+mkdir -p "$sources/vte-0.85.0"
+git -C subs/vte archive --format=tar "$pinned" \
+    | tar -x -C "$sources/vte-0.85.0"
+for sub in fast_float fmt simdutf; do
+    if [[ ! -d subs/vte/third_party/$sub/.git && ! -e subs/vte/third_party/$sub/.git ]]; then
+        echo "Initialize VTE first: git submodule update --init --recursive" >&2
+        exit 1
+    fi
+    subpinned=$(git -C "subs/vte/third_party/$sub" rev-parse HEAD)
+    git -C "subs/vte/third_party/$sub" archive --format=tar "$subpinned" \
+        | tar -x -C "$sources/vte-0.85.0/third_party/$sub"
+done
+cp -- scripts/vte-osc52-run "$sources/vte-osc52-run"
+cp -a -- packaging/deb/debian "$sources/vte-0.85.0/debian"
+
+printf 'Building VTE source commit %s for Ubuntu %s\n' "$pinned" "$suite"
+
+# Generate the source tarball with dpkg-source style version suffix.
+tar -czf "${tarfile%.tar.gz}.orig.tar.gz" -C "$sources" vte-0.85.0
+
+cleanup() {
+    podman rm -f -- "$container_name" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+podman run --rm --name "$container_name" \
+    -v "$sources:/build:rw" \
+    -e DEBIAN_FRONTEND=noninteractive \
+    "$image" bash -euxc '
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential gcc-14 g++-14 clang meson ninja-build gettext python3 pkgconf \
+        devscripts dh-exec lintian \
+        libfast-float-dev libfmt-dev libcairo2-dev \
+        libglib2.0-dev libpango1.0-dev libpcre2-dev liblz4-dev \
+        libfribidi-dev libgnutls28-dev libgtk-3-dev libgtk-4-dev \
+        libicu-dev libsystemd-dev libgirepository-1.0-dev \
+        gobject-introspection valac gi-docgen
+    cd /build/vte-0.85.0
+    export CC=gcc-14 CXX=g++-14
+    export DEB_BUILD_MAINT_OPTIONS=hardening=-lto
+    dpkg-buildpackage -us -uc -b
+'
+cp -a "$sources"/*.deb "$sources"/*.buildinfo "$sources"/*.changes "$resultdir"/ 2>/dev/null || true
+if ! compgen -G "$resultdir/vte-osc52_*.deb" >/dev/null; then
+    echo "Expected a built vte-osc52 .deb in $resultdir." >&2
+    exit 1
+fi
+printf 'Artifacts and logs are in %s\n' "$resultdir"
